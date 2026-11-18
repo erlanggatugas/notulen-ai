@@ -1,0 +1,7 @@
+{
+  "appId": "com.notulen.ai",
+  "appName": "Notulen AI",
+  "webDir": "www",
+  "server": { "androidScheme": "https" },
+  "plugins": { "CapacitorHttp": { "enabled": true } }
+}

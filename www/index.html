@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="id"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f766e"><title>Notulen AI</title>
+<style>
+:root{--bg:#f4f7f6;--card:#fff;--tx:#12302c;--mut:#5b7370;--pri:#0f766e;--bd:#d9e5e2;--red:#dc2626}
+@media (prefers-color-scheme:dark){:root{--bg:#0b1a18;--card:#132b28;--tx:#e6f4f1;--mut:#8fb0aa;--pri:#2dd4bf;--bd:#244541}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.5 system-ui,Roboto,sans-serif;padding-bottom:env(safe-area-inset-bottom,0)}
+.wrap{max-width:560px;margin:0 auto;padding:0 14px 60px}
+.hero{background:linear-gradient(135deg,#0f766e,#14b8a6 60%,#6ee7b7);color:#fff;border-radius:0 0 24px 24px;margin:0 -14px 14px;padding:calc(18px + env(safe-area-inset-top,0px)) 18px 16px;position:relative;overflow:hidden;min-height:110px}
+.hero h1{margin:0;font-size:22px}.hero p{margin:2px 0 0;font-size:14px;opacity:.9;max-width:65%}
+.hero svg{position:absolute;right:8px;bottom:0;width:120px;height:110px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:16px;padding:14px;margin-bottom:12px}
+.card h2{margin:0 0 8px;font-size:15px}label{font-size:13px;color:var(--mut);display:block;margin:8px 0 4px}
+input,textarea{width:100%;border:1px solid var(--bd);background:transparent;color:var(--tx);border-radius:12px;padding:10px 12px;font:inherit}
+textarea{min-height:150px}.row{display:flex;gap:8px;flex-wrap:wrap}
+button{font:inherit;border:0;border-radius:12px;padding:10px 14px;background:var(--pri);color:#fff;font-weight:600}
+button.sec{background:transparent;color:var(--pri);border:1px solid var(--pri)}button:disabled{opacity:.5}
+.mic{width:100%;padding:14px;background:linear-gradient(135deg,#0f766e,#14b8a6)}.mic.on{background:var(--red)}
+.meta{font-size:12px;color:var(--mut)}.err{color:var(--red);font-size:14px}.task{border:1px solid var(--bd);border-radius:12px;padding:8px 10px;margin:6px 0}
+.hist{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--bd)}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#12302c;color:#fff;padding:10px 16px;border-radius:99px;font-size:14px;opacity:0;transition:.25s;pointer-events:none}.toast.show{opacity:1}
+</style></head><body><div class="wrap">
+<div class="hero"><h1>Notulen AI</h1><p>Rekam rapat, AI menyusun notulen otomatis.</p>
+<svg viewBox="0 0 120 110"><rect x="30" y="14" width="64" height="82" rx="8" fill="#fff"/><rect x="40" y="28" width="30" height="5" rx="2.5" fill="#14b8a6"/><rect x="40" y="40" width="44" height="4" rx="2" fill="#99c9c3"/><rect x="40" y="50" width="38" height="4" rx="2" fill="#99c9c3"/><circle cx="92" cy="84" r="18" fill="#f59e0b"/><rect x="87" y="72" width="10" height="16" rx="5" fill="#fff"/></svg></div>
+
+<div class="card"><h2>📅 Info rapat</h2>
+<label>Judul</label><input id="title" placeholder="Contoh: Rapat Evaluasi Mingguan">
+<label>Peserta</label><input id="people" placeholder="Pisahkan dengan koma">
+<label>Tanggal</label><input id="date" type="date"></div>
+
+<div class="card"><h2>🎙️ Rekam &amp; transkrip</h2>
+<button id="mic" class="mic">🎙️ Mulai merekam suara</button><div id="interim" class="meta" style="min-height:20px;margin-top:6px"></div>
+<label>Transkrip (bisa diketik atau diedit)</label><textarea id="tr"></textarea>
+<div class="row" style="margin-top:10px"><button id="ai">✨ Buat notulen dengan AI</button><button id="clr" class="sec">Kosongkan</button></div>
+<div id="err" class="err"></div></div>
+
+<div id="res" class="card" hidden></div>
+
+<div class="card"><h2>⚙️ Pengaturan AI</h2>
+<label>API key Anthropic (disimpan hanya di HP ini)</label><input id="key" type="password" placeholder="sk-ant-...">
+<label>Model</label><input id="model" value="claude-sonnet-5-5"></div>
+
+<div class="card"><h2>🕘 Riwayat</h2><div id="hist"></div></div>
+</div><div id="toast" class="toast"></div>
+<script>
+const $=id=>document.getElementById(id),C=window.Capacitor,native=!!(C&&C.isNativePlatform&&C.isNativePlatform()),P=n=>C&&C.Plugins&&C.Plugins[n];
+const LS={g:(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}},s:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
+let cur=null,want=false,last='',web=null;
+const toast=t=>{const e=$('toast');e.textContent=t;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),2500)};
+$('date').valueAsDate=new Date();$('key').value=LS.g('nk','');$('model').value=LS.g('nm','claude-sonnet-5-5');
+$('key').onchange=()=>LS.s('nk',$('key').value.trim());$('model').onchange=()=>LS.s('nm',$('model').value.trim());
+
+/* ---------- Rekam suara ---------- */
+const add=t=>{if(!t)return;const a=$('tr');a.value=(a.value?a.value+' ':'')+t};
+const commit=()=>{add(last);last='';$('interim').textContent=''};
+const ui=on=>{$('mic').classList.toggle('on',on);$('mic').textContent=on?'⏹️ Berhenti merekam':'🎙️ Mulai merekam suara'};
+const SRopt={language:'id-ID',partialResults:true,popup:false,maxResults:1};
+if(native&&P('SpeechRecognition')){const SR=P('SpeechRecognition');
+ SR.addListener('partialResults',d=>{last=(d.matches&&d.matches[0])||'';$('interim').textContent=last});
+ SR.addListener('listeningState',d=>{if(d.status==='stopped'){commit();if(want)setTimeout(()=>SR.start(SRopt).catch(()=>{}),300)}})}
+async function startRec(){
+ if(native){const SR=P('SpeechRecognition');if(!SR)return toast('Plugin suara tidak ditemukan');
+  const a=await SR.available();if(!a.available)return toast('Pengenal suara tidak tersedia di HP ini');
+  const p=await SR.requestPermissions();if(p.speechRecognition!=='granted')return toast('Izin mikrofon ditolak');
+  want=true;ui(true);await SR.start(SRopt)}
+ else{const R=window.SpeechRecognition||window.webkitSpeechRecognition;if(!R)return toast('Browser tidak mendukung rekam suara');
+  web=new R();web.lang='id-ID';web.continuous=true;web.interimResults=true;
+  web.onresult=e=>{let i='';for(let k=e.resultIndex;k<e.results.length;k++){const r=e.results[k];if(r.isFinal)add(r[0].transcript);else i+=r[0].transcript}$('interim').textContent=i};
+  web.onend=()=>{if(want)try{web.start()}catch(e){}};want=true;ui(true);web.start()}}
+async function stopRec(){want=false;ui(false);if(native){try{await P('SpeechRecognition').stop()}catch(e){}commit()}else if(web)web.stop()}
+$('mic').onclick=()=>want?stopRec():startRec().catch(e=>{want=false;ui(false);toast('Gagal merekam')});
+$('clr').onclick=()=>{$('tr').value='';$('res').hidden=true;cur=null;$('err').textContent=''};
+
+/* ---------- AI ---------- */
+$('ai').onclick=async()=>{
+ const tr=$('tr').value.trim(),key=$('key').value.trim();$('err').textContent='';
+ if(tr.length<20)return $('err').textContent='Transkrip masih terlalu pendek.';
+ if(!key)return $('err').textContent='Isi API key Anthropic di Pengaturan AI (bagian bawah).';
+ const b=$('ai');b.disabled=true;b.textContent='⏳ AI sedang menyusun…';
+ const prompt='Anda notulis rapat profesional. Dari transkrip, buat notulen Bahasa Indonesia. Balas HANYA JSON valid: {"ringkasan":"2-3 kalimat","poin":["pembahasan"],"keputusan":["keputusan"],"tugas":[{"tugas":"...","pic":"nama atau -","tenggat":"tanggal atau -"}]}. Jangan mengarang.\n\nJudul: '+($('title').value||'-')+'\nPeserta: '+($('people').value||'-')+'\n\nTranskrip:\n'+tr;
+ try{
+  const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:$('model').value||'claude-sonnet-5-5',max_tokens:2000,messages:[{role:'user',content:prompt}]})});
+  const d=await r.json();if(!r.ok)throw new Error(d.error&&d.error.message||r.status);
+  const j=JSON.parse(d.content.map(x=>x.text||'').join('').replace(/```json|```/g,'').match(/\{[\s\S]*\}/)[0]);
+  cur={id:Date.now(),title:$('title').value||'Rapat tanpa judul',people:$('people').value,date:$('date').value,tr,ringkasan:j.ringkasan||'',poin:j.poin||[],keputusan:j.keputusan||[],tugas:j.tugas||[]};
+  render();LS.s('nl',[cur,...LS.g('nl',[]).filter(x=>x.id!==cur.id)].slice(0,30));hist();
+ }catch(e){$('err').textContent='AI gagal: '+e.message}
+ b.disabled=false;b.textContent='✨ Buat notulen dengan AI';
+};
+
+/* ---------- Tampilan hasil ---------- */
+const fd=d=>{try{return new Date(d+'T00:00').toLocaleDateString('id-ID',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}catch(e){return d||''}};
+const el=(t,x,c)=>{const e=document.createElement(t);if(x)e.textContent=x;if(c)e.className=c;return e};
+function render(){const b=$('res');b.hidden=false;b.replaceChildren();
+ b.append(el('h2','📝 '+cur.title),el('div',fd(cur.date)+(cur.people?' · '+cur.people:''),'meta'),el('p',cur.ringkasan));
+ const L=(h,a)=>{if(!a.length)return;b.append(el('h2',h));const u=el('ul');a.forEach(x=>u.append(el('li',x)));b.append(u)};
+ L('💬 Pembahasan',cur.poin);L('✅ Keputusan',cur.keputusan);
+ if(cur.tugas.length){b.append(el('h2','📌 Tindak lanjut'));cur.tugas.forEach(t=>{const d=el('div',t.tugas,'task');d.append(el('div','PIC: '+(t.pic||'-')+' · Tenggat: '+(t.tenggat||'-'),'meta'));b.append(d)})}
+ const r=el('div','','row');r.style.marginTop='12px';
+ [['📋 Salin',copy],['🟢 WhatsApp',wa],['☁️ Drive / File',file],['📤 Bagikan',share]].forEach(([t,f])=>{const x=el('button',t);x.onclick=f;r.append(x)});
+ b.append(r);b.scrollIntoView({behavior:'smooth'})}
+function txt(n,plain){let t='*NOTULEN RAPAT*\n'+n.title+'\n'+fd(n.date)+(n.people?'\nPeserta: '+n.people:'')+'\n\n*Ringkasan*\n'+n.ringkasan;
+ if(n.poin.length)t+='\n\n*Pembahasan*\n'+n.poin.map(x=>'• '+x).join('\n');
+ if(n.keputusan.length)t+='\n\n*Keputusan*\n'+n.keputusan.map(x=>'✅ '+x).join('\n');
+ if(n.tugas.length)t+='\n\n*Tindak lanjut*\n'+n.tugas.map((x,i)=>(i+1)+'. '+x.tugas+' (PIC: '+(x.pic||'-')+', tenggat: '+(x.tenggat||'-')+')').join('\n');
+ return plain?t.replace(/\*/g,''):t}
+async function copy(){try{await navigator.clipboard.writeText(txt(cur));toast('Notulen disalin')}catch(e){toast('Gagal menyalin')}}
+function wa(){location.href='https://wa.me/?text='+encodeURIComponent(txt(cur))}
+async function file(){const name='notulen-'+(cur.date||'rapat')+'.txt',data=txt(cur,1);
+ if(native){try{const w=await P('Filesystem').writeFile({path:name,data,directory:'CACHE',encoding:'utf8'});await P('Share').share({title:cur.title,files:[w.uri]})}catch(e){if(!/cancel/i.test(e.message||''))toast('Gagal membagikan file')}}
+ else{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([data],{type:'text/plain'}));a.download=name;a.click()}}
+async function share(){if(native)try{await P('Share').share({title:cur.title,text:txt(cur)})}catch(e){}else if(navigator.share)navigator.share({title:cur.title,text:txt(cur)}).catch(()=>{});else copy()}
+
+/* ---------- Riwayat ---------- */
+function hist(){const h=$('hist'),l=LS.g('nl',[]);h.replaceChildren();if(!l.length)return h.append(el('span','Belum ada notulen tersimpan.','meta'));
+ l.forEach(n=>{const r=el('div','','hist'),a=el('div');a.append(el('b',n.title),el('span',fd(n.date),'meta'));
+  const o=el('button','Buka','sec');o.onclick=()=>{cur=n;$('title').value=n.title;$('people').value=n.people||'';$('date').value=n.date;$('tr').value=n.tr;render()};
+  const x=el('button','🗑️','sec');x.onclick=()=>{LS.s('nl',LS.g('nl',[]).filter(z=>z.id!==n.id));hist()};
+  const g=el('div','','row');g.append(o,x);r.append(a,g);h.append(r)})}
+hist();
+</script></body></html>
